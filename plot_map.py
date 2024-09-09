@@ -121,6 +121,8 @@ def plot_map_europe(
 
     ax.set_aspect(1.5)  # adjust the display ratio
 
+    plt.gcf().set_facecolor('dodgerblue') # set background color
+
     # ======================
     # add the country labels
     # ======================
@@ -178,8 +180,8 @@ def plot_map_europe(
         plt.title(title, fontsize=16, weight='bold')
 
     plt.axis("off")
-    plt.savefig(OUTPUT_PATH + f'{title}.svg')
-    # plt.show()
+    # plt.savefig(OUTPUT_PATH + f'{title}.svg')
+    plt.show()
 
 
 def generate_color_col(
@@ -238,7 +240,7 @@ def task_europe_friendliness():
         # not all countries are included in each yaer
         cols = ['NAME', 'friendly_index_net', 'color']
         tmp = df.loc[df['year'] == cur_year, cols]
-        plot_map_europe(tmp, cmap, bound, title=f"{cur_year}")
+        # plot_map_europe(tmp, cmap, bound, title=f"{cur_year}")
 
     # ==========
     # Total Year
