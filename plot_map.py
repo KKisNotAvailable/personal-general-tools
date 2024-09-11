@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import seaborn as sns
@@ -10,17 +11,17 @@ import warnings
 # Ignore all warnings
 warnings.filterwarnings("ignore")
 '''
+Map geometry source:
 https://www.naturalearthdata.com/downloads/110m-cultural-vectors/
-
-https://jan-46106.medium.com/plotting-maps-with-european-data-in-python-part-i-decd83837de4
 '''
 
 OUTPUT_PATH = './output/'
+if not os.path.exists(OUTPUT_PATH):
+    os.makedirs(OUTPUT_PATH)
 
-# TODO:
-# 1. when plotting, can we just read the geo data once?
-# 2. add country label part not yet debugged. (worked only on 2017 and 2023)
-
+# TODO: 
+# 1. remove redundant file reading part
+# 2. make the arguments kwargs (and need_colorbar=T/F)
 
 # load the low resolution world map
 def plot_map_world(extra_data: pd.DataFrame = None, area: str = None):
@@ -81,12 +82,6 @@ def plot_map_europe(
         ax=None,
         is_sub=False
     ):
-    '''
-    You can set area to be
-    1. No specify: no filtering
-    2. 'in data': will use the column 'NAME' in the extra_data to filter the countries
-    3. name of continent, eg. "Europe": will filter to include countries in that continent
-    '''
     cols_to_keep = [
         'CONTINENT',
         # 'REGION_UN',
@@ -100,7 +95,7 @@ def plot_map_europe(
         'geometry'
     ]
 
-    # 2. get data of other countries
+    # 1. get data of other countries
     # Include Cyprus (for current need) and exclude Russia (too large)
     countries = gpd.read_file('./data/ne_10m_admin_0_countries/')  # high res
 
@@ -109,11 +104,15 @@ def plot_map_europe(
         (countries['NAME'] == "Cyprus")
 
     countries = countries.loc[cond, cols_to_keep].reset_index(drop=True)
+
+    # 2. combine with our data (with color column in it)
     countries = pd.merge(countries, extra_data, on='NAME', how='left')
 
-    # countries['color'].fillna('#808080', inplace=True) # will not work in future
+    # if country no color assigned, set it to be gray 
+    # (but not supposed to have for current setup)
     countries.fillna({'color': '#808080'}, inplace=True)
 
+    ax.set_axis_off() # turn the axis off
     countries.plot(
         ax=ax, 
         color=countries.color,
@@ -121,7 +120,7 @@ def plot_map_europe(
         linewidth=0.5             # Width of the edges
     )
 
-    # actually, setting the display limit solves the territory problem
+    # setting the display limit solves the territory problem
     ax.set_xlim([-25, 45])  # Longitude
     ax.set_ylim([30, 72])   # Latitude
 
@@ -158,8 +157,10 @@ def plot_map_europe(
     # add color bar
     # =============
     sm = plt.cm.ScalarMappable(cmap=cmap)
+    
+    cax = ax.inset_axes([0.1, 0.1, 0.02, 0.3], transform=ax.transAxes) # set the colorbar position and size
     cbar = fig.colorbar(
-        sm, ax=ax, fraction=0.035, pad=0.04,
+        sm, cax=cax, fraction=0.035, pad=0.04,
         orientation='vertical'
     )
     np_bound = np.array(bound)
@@ -167,21 +168,26 @@ def plot_map_europe(
     cbar.set_ticks(normalized)
     cbar.set_ticklabels(
         np.round(bound, 0).astype(int), 
-        ha='right', # horizontal alignment
-        x=2.0 # the starting point of label, =0 will be overlapping with the colorbar
+        ha='left', # horizontal alignment
+        # x=2.0 # the starting point of label, =0 will be overlapping with the colorbar
     )
-    cbar.ax.tick_params(labelsize=8)
+    cbar.ax.tick_params(labelsize=6)
 
-    cbar.set_label('Friendly Index')
+    cbar.set_label('Friendly Index', fontsize=8)
     cbar.ax.yaxis.set_label_position('left')
+    # cbar.ax.set_position([0.17, 0.15, 0.03, 0.38])
 
     if title:
         ax.set_title(title, fontsize=16, weight='bold')
 
-    # make the margin smaller
+    # if is not subplot
     if not is_sub:
+        # make the margin smaller
         plt.subplots_adjust(left=0.03, right=0.97, top=0.95, bottom=0.05)
-        cbar.ax.set_position([0.17, 0.15, 0.03, 0.38])  # (left, bottom, width, height)
+        
+        # plt.savefig(OUTPUT_PATH + f'{title}.svg')
+        plt.show()
+        plt.close()
 
     return
 
@@ -217,15 +223,13 @@ def generate_color_col(
 
 
 def task_europe_friendliness():
-    '''
-    ['country', 'year', 'unfriendly_cnt', 'friendly_cnt',
-    'friendly_index_net']
-    '''
+    # 1. Prepare the friendliness data
     df = pd.read_stata("./data/friendly_index_net.dta")
     cols_to_keep = ['country', 'year', 'friendly_index_net']
     df = df[cols_to_keep]
     df['year'] = df['year'].astype('int32')
 
+    # add UK and set to be 0 (to prevent it being gray)
     UK_data = pd.DataFrame({
         'country': ["英國"] * 7,
         'year': [n for n in range(2017, 2024)],
@@ -234,33 +238,34 @@ def task_europe_friendliness():
 
     df = pd.concat([df, UK_data]).reset_index(drop=True)
 
+    # 2. Mapping the chinese names in friendliness data to english
     name_map = pd.read_csv("./data/eu_country_name_mapping.csv")
 
     df = pd.merge(df, name_map, on='country', how='left')
 
+    # 3. For yearly data, 
+    #    - prepare color column 
+    #    - set the color map
+    #    - set the friendliness index range (for color bar display)
     df['color'], cmap, bound = generate_color_col(
         srs=df['friendly_index_net'],
         step=3
     )
 
+    # 4. Plot the yearly data
     y_list = sorted(set(df['year']))
-    # y_list = [2017]
-
     sizex, sizey = 12, 9
+    cols = ['NAME', 'friendly_index_net', 'color']
 
     for cur_year in y_list:
         # not all countries are included in each yaer
-        cols = ['NAME', 'friendly_index_net', 'color']
         tmp = df.loc[df['year'] == cur_year, cols]
         fig, axs = plt.subplots(1, 1, figsize=(sizex, sizey))
         plot_map_europe(tmp, cmap, bound, title=f"{cur_year}", ax=axs, fig=fig)
-        plt.axis("off")
-        plt.savefig(OUTPUT_PATH + f'{cur_year}.svg')
-        # plt.show()
-
-    # ==========
-    # Total Year
-    # ==========
+    
+    # 5. Plot the aggregate years
+    #    - get combined data
+    #    - prepare color things
     grouped_df = df.groupby('NAME')['friendly_index_net'].sum().reset_index()
 
     grouped_df['color'], cmap_all, bound_all = generate_color_col(
@@ -269,34 +274,32 @@ def task_europe_friendliness():
     )
     fig, axs = plt.subplots(1, 1, figsize=(sizex, sizey))
     plot_map_europe(grouped_df, cmap_all, bound_all, title="2017-2023", ax=axs, fig=fig)
-    plt.axis("off")
-    plt.savefig(OUTPUT_PATH + '2017-2023.svg')
-    # plt.show()
-
-    # ====================================
-    # combine plots: all, 2017, 2020, 2023
-    # ====================================
+    
+    # 6. Plot aggr, 2017, 2020, 2023 on the same image
+    #    - prepare frames for subplots
+    #    - plot each designated year again onto subplots
     fig, axs = plt.subplots(2, 2, figsize=(sizex, sizey))
 
+    # top-left
     cur_axs = axs[0, 0]
-    cur_axs.set_axis_off()
+    cur_bound = [min(bound_all), 0, max(bound_all)]
     plot_map_europe(
-        grouped_df, cmap_all, bound_all, title="2017-2023", 
+        grouped_df, cmap_all, cur_bound, title="2017-2023", 
         ax=cur_axs, fig=fig, is_sub=True
     )
 
-    cols = ['NAME', 'friendly_index_net', 'color']
-
+    cur_bound = [min(bound), 0, max(bound)]
+    # top-right -> bottom-left -> bottom-right
     for cur_year, cur_axs in zip([2017, 2020, 2023], [axs[0, 1], axs[1, 0], axs[1, 1]]):
-        cur_axs.set_axis_off()
-        tmp = df.loc[df['year'] == cur_year, cols]
+        tmp = df.loc[df['year'] == cur_year, cols] # "cols" is the same when plotting yearly
         plot_map_europe(
-            tmp, cmap, bound, title=f"{cur_year}", 
+            tmp, cmap, cur_bound, title=f"{cur_year}", 
             ax=cur_axs, fig=fig, is_sub=True
         )
-    
-    plt.savefig(OUTPUT_PATH + 'combined.svg')
-    # plt.show()
+
+    plt.subplots_adjust(wspace=-0.3, hspace=0.1) # Adjust horizontal and vertical space
+    # plt.savefig(OUTPUT_PATH + 'combined.svg')
+    plt.show()
 
     return
 
